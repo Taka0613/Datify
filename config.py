@@ -2,7 +2,6 @@
 MODEL_PATH = "xgboost_model.py"  # Path to save the model as a Python script
 DATA_PATH = "AI需要予測送付用_アイテムフラグ.xlsx"
 SKIP_ROWS = 16  # Rows to skip when reading the data
-USE_COLUMNS = ["date", "sales"]  # Columns to read from the Excel file
 FEATURE_COLUMNS = ["year", "month", "day", "day_of_week"]  # Features for the model
 TARGET_COLUMN = "sales"  # Target variable
 TRAIN_TEST_SPLIT_RATIO = 0.8  # Ratio for splitting train/test data

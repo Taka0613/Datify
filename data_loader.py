@@ -1,22 +1,68 @@
 import pandas as pd
 
 
-def load_data(file_path, skip_rows, use_columns):
+def load_data(file_path, skip_rows, date_column, sales_column):
     """
     Loads the data and preprocesses it for modeling.
+    Dynamically matches columns based on combined header rows (2nd, 4th, 6th, and 8th rows).
     """
-    data = pd.read_excel(
-        file_path, skiprows=skip_rows, usecols=use_columns, names=["date", "sales"]
+    # Step 1: Read specific header rows (2nd, 4th, 6th, and 8th rows)
+    header_rows = (
+        pd.read_excel(file_path, nrows=8, header=None).iloc[[1, 3, 5, 7]].fillna("")
     )
-    data["date"] = pd.to_datetime(data["date"])
-    data.dropna(subset=["sales"], inplace=True)
+
+    # Combine the specified rows to create unique column names
+    combined_headers = header_rows.apply(
+        lambda x: "_".join(x.astype(str).str.strip()), axis=0
+    ).tolist()
+
+    # Ignore the first column and adjust the headers accordingly
+    combined_headers = combined_headers[1:]
+
+    # Step 2: Match selected columns with combined headers
+    if sales_column not in combined_headers:
+        raise ValueError(
+            f"Column '{sales_column}' not found. Available columns: {combined_headers}"
+        )
+
+    # Map the date column to the first column index and sales column to its matching index
+    date_index = 0  # First column is assumed to be the date column
+    sales_index = (
+        combined_headers.index(sales_column) + 1
+    )  # Adjust for skipped first column
+    usecols = [date_index, sales_index]
+
+    # Step 3: Load only the necessary columns and skip irrelevant rows
+    data = pd.read_excel(file_path, skiprows=skip_rows, usecols=usecols)
+
+    # Rename columns for consistency
+    data.columns = ["date", "sales"]
     return data
+
+
+def extract_column_names(file_path):
+    """
+    Extracts column names based on the 2nd, 4th, 6th, and 8th rows of the Excel file.
+    """
+    header_rows = pd.read_excel(file_path, nrows=8, header=None)
+    column_names = header_rows.iloc[[1, 3, 5, 7]].fillna("").apply("_".join, axis=0)
+    return column_names
 
 
 def add_features(data):
     """
-    Adds date-related features to the dataset.
+    Adds additional features to the data for modeling.
+    Ensures the 'date' column is in datetime format before feature extraction.
     """
+    # Ensure 'date' column is in datetime format
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+
+    # Drop rows where the date conversion failed
+    if data["date"].isnull().any():
+        data = data.dropna(subset=["date"])
+        print("Dropped rows with invalid dates.")
+
+    # Extract features from the 'date' column
     data["year"] = data["date"].dt.year
     data["month"] = data["date"].dt.month
     data["day"] = data["date"].dt.day
