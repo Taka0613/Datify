@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environment
+env/
+venv/
+
+# System files
+.DS_Store
+
+# Logs
+*.log
+
+# Large datasets
+*.xlsx
+
+# Model outputs
+*.pkl
+*.h5
