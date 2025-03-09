@@ -11,7 +11,7 @@ from config import (
     TRAIN_TEST_SPLIT_RATIO,
     XGBOOST_PARAMS,
 )
-from data_loader import extract_column_names, load_data, add_features, split_data
+from data_loader import *
 from model_utils import train_xgboost, evaluate_model, save_model_as_py
 from feature_importance import (
     compute_shap_values,
@@ -76,16 +76,17 @@ def load_and_process_data(file_path, skip_rows, date_column, sales_column):
 
 
 # App Title
-st.title("Wonder Palette app")
+st.title("Datify app")
 
 # Tabs for Navigation
 tab1, tab2, tab3, tab4 = st.tabs(
     ["🔍 Search", "⚙️ Train Model", "📊 Explainable AI", "📈 Visualization"]
 )
 
-# Tab 1: Search
 with tab1:
-    st.header("Search for Product Data")
+    st.header("🔍 Search for Product Data")
+
+    # Search filters
     market_query = st.text_input("Search by Market (e.g., 'Market A')")
     category_query = st.text_input("Search by Category (e.g., 'Category X')")
     brand_query = st.text_input("Search by Brand (e.g., 'Brand 1')")
@@ -95,7 +96,7 @@ with tab1:
         column_names = extract_column_names(DATA_PATH)
         matching_columns = column_names
 
-        # Apply filters
+        # Apply filters dynamically
         if market_query:
             matching_columns = [
                 col for col in matching_columns if market_query.lower() in col.lower()
@@ -114,56 +115,132 @@ with tab1:
             ]
 
         st.session_state.matching_columns = matching_columns
-        st.session_state.selected_column = None
-        st.session_state.run_training = False
+        st.session_state.selected_column = None  # Reset selection
+        st.session_state.run_training = False  # Reset training state
 
     # Display search results
     if st.session_state.matching_columns:
         st.subheader("Search Results")
-        matching_columns_with_index = [
-            f"{i}: {col}"
-            for i, col in enumerate(st.session_state.matching_columns, start=1)
-        ]
         selected_option = st.selectbox(
-            "Select a column to train on:", matching_columns_with_index
+            "Select a column to analyze:", st.session_state.matching_columns
         )
-        st.session_state.selected_column = selected_option.split(": ", 1)[1]
-        st.write(f"You selected: {st.session_state.selected_column}")
 
-        if st.button("Run Training"):
-            st.session_state.run_training = True
+        if selected_option:
+            st.session_state.selected_column = selected_option  # Store selection
+            st.write(f"✅ Selected Column: `{st.session_state.selected_column}`")
+
+    # Ensure a column is selected before proceeding to insights
+    if not st.session_state.selected_column:
+        st.warning("⚠️ Please select a column before generating insights.")
+    else:
+        if st.button("Generate Insights"):
+            st.session_state.run_insights = True  # Flag to trigger insights
+
+    # Data Insights Panel (Runs when "Generate Insights" is clicked)
+    if "run_insights" in st.session_state and st.session_state.run_insights:
+        st.header("📊 Data Insights")
+
+        # Ensure a valid column is selected
+        if not st.session_state.selected_column:
+            st.error(
+                "⚠️ No column selected. Please select a column before running insights."
+            )
+        else:
+            date_column = extract_column_names(DATA_PATH)[0]
+            selected_sales_column = st.session_state.selected_column
+
+            # Load data with selected column
+            data = load_and_process_data(
+                DATA_PATH, SKIP_ROWS, date_column, selected_sales_column
+            )
+
+            insights = generate_data_insights(data)
+
+            # Display missing values
+            if insights["missing_values"]:
+                st.subheader("🔴 Missing Values Detected")
+                for col, percentage in insights["missing_values"].items():
+                    st.write(f"**{col}**: {percentage:.2f}% missing")
+            else:
+                st.write("✅ No missing values detected!")
+
+            # Show feature statistics
+            st.subheader("📊 Feature Statistics")
+            st.dataframe(
+                pd.DataFrame.from_dict(insights["feature_statistics"], orient="index")
+            )
+
+            # Show correlation with sales
+            if "correlation" in insights:
+                st.subheader("📈 Correlation with Sales")
+                st.bar_chart(pd.Series(insights["correlation"]))
+
+            # Show data distribution plots
+            st.subheader("📌 Data Distributions")
+            st.pyplot(plot_data_distribution(data))
+
 
 # Tab 2: Train Model
 with tab2:
     st.header("⚙️ Model Training and Evaluation")
-    if st.session_state.run_training and st.session_state.selected_column:
+
+    # Ensure that insights were generated first
+    if "run_insights" not in st.session_state or not st.session_state.run_insights:
+        st.warning("⚠️ Please generate data insights before training the model.")
+    elif st.session_state.selected_column:
         date_column = extract_column_names(DATA_PATH)[0]
         sales_column = st.session_state.selected_column
         data = load_and_process_data(DATA_PATH, SKIP_ROWS, date_column, sales_column)
 
-        # Progress bar for training
+        # Model selection dropdown
+        model_choice = st.radio(
+            "Select Model:", ["LightGBM (Fast)", "XGBoost (Slower, More Accurate)"]
+        )
+
+        if st.button("Train Model"):
+            st.session_state.run_training = True  # Flag for training
+
+    # Run Training if initiated
+    if st.session_state.run_training and st.session_state.selected_column:
         with st.spinner("Training model..."):
+            # Split the data
             X_train, y_train, X_test, y_test = split_data(
                 data, FEATURE_COLUMNS, TARGET_COLUMN, TRAIN_TEST_SPLIT_RATIO
             )
 
-            model = train_xgboost(X_train, y_train, XGBOOST_PARAMS)
+            # Select and train model
+            if model_choice == "LightGBM (Fast)":
+                from lightgbm import LGBMRegressor
+
+                model = LGBMRegressor(
+                    n_estimators=100, learning_rate=0.1, random_state=42
+                )
+            else:
+                from xgboost import XGBRegressor
+
+                model = XGBRegressor(**XGBOOST_PARAMS)
+
+            model.fit(X_train, y_train)
             st.session_state.model = model
             st.session_state.X_train = X_train
 
+            # Compute SHAP values
             shap_values, _ = compute_shap_values(model, X_train)
             st.session_state.shap_values = shap_values
 
+            # Make predictions
             predictions = model.predict(X_test)
             rmse = mean_squared_error(y_test, predictions, squared=False)
             st.metric(label="RMSE", value=f"{rmse:.2f}")
 
+            # Save model
             save_model_as_py(model, MODEL_PATH, FEATURE_COLUMNS, XGBOOST_PARAMS)
-            st.success(f"Model saved to: `{MODEL_PATH}`")
+            st.success(f"Model saved!")
 
 # Tab 3: Explainable AI
 with tab3:
     st.header("📊 Explainable AI")
+
     if st.session_state.model and st.session_state.shap_values is not None:
         mode = st.radio("Select Mode", ["Simple", "Advanced"])
 
@@ -192,6 +269,7 @@ with tab3:
 # Tab 4: Visualization
 with tab4:
     st.header("📈 Data Visualization")
+
     if st.session_state.selected_column:
         date_column = extract_column_names(DATA_PATH)[0]
         data = load_and_process_data(

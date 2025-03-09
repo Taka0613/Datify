@@ -23,15 +23,31 @@ def evaluate_model(model, X_test, y_test):
 def save_model_as_py(model, model_path, feature_columns, params):
     """
     Saves the trained model as a Python script.
+    Handles both XGBoost and LightGBM models.
     """
     with open(model_path, "w") as f:
-        f.write("# XGBoost Model Saved as Python File\n")
-        f.write("from xgboost import XGBRegressor\n\n")
-        f.write("def load_model():\n")
-        f.write("    model = XGBRegressor(\n")
-        for key, value in params.items():
-            f.write(f"        {key}={repr(value)},\n")
-        f.write("    )\n")
-        f.write(f"    model.load_model({repr(model.get_booster().save_raw())})\n")
-        f.write("    return model\n\n")
+        f.write("# Machine Learning Model Saved as Python File\n")
+
+        # Identify model type
+        model_type = type(model).__name__
+
+        if model_type == "XGBRegressor":
+            f.write("from xgboost import XGBRegressor\n\n")
+            f.write("def load_model():\n")
+            f.write("    model = XGBRegressor(\n")
+            for key, value in params.items():
+                f.write(f"        {key}={repr(value)},\n")
+            f.write("    )\n")
+            f.write(f"    model.load_model({repr(model.get_booster().save_raw())})\n")
+            f.write("    return model\n\n")
+
+        elif model_type == "LGBMRegressor":
+            f.write("from lightgbm import LGBMRegressor\n\n")
+            f.write("def load_model():\n")
+            f.write("    model = LGBMRegressor(\n")
+            for key, value in params.items():
+                f.write(f"        {key}={repr(value)},\n")
+            f.write("    )\n")
+            f.write("    return model\n\n")
+
         f.write(f"# Features used for training: {feature_columns}\n")

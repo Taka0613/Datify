@@ -1,4 +1,7 @@
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import streamlit as st
 
 
 def load_data(file_path, skip_rows, date_column, sales_column):
@@ -82,3 +85,43 @@ def split_data(data, feature_columns, target_column, split_ratio=0.8):
     X_test = test_data[feature_columns]
     y_test = test_data[target_column]
     return X_train, y_train, X_test, y_test
+
+
+def generate_data_insights(data):
+    """
+    Generates a summary of key dataset insights, including missing values, correlation, and distributions.
+    """
+    insights = {}
+
+    # Check for missing values
+    missing_values = data.isnull().sum()
+    missing_percentage = (missing_values / len(data)) * 100
+    insights["missing_values"] = missing_percentage[missing_percentage > 0].to_dict()
+
+    # Feature statistics
+    feature_stats = data.describe().T
+    insights["feature_statistics"] = feature_stats.to_dict()
+
+    # Correlation with target variable
+    if "sales" in data.columns:
+        correlation = data.corr()["sales"].sort_values(ascending=False)
+        insights["correlation"] = correlation.to_dict()
+
+    return insights
+
+
+def plot_data_distribution(data):
+    """
+    Plots data distribution for numerical features.
+    """
+    numerical_cols = data.select_dtypes(include=["number"]).columns
+    fig, ax = plt.subplots(
+        len(numerical_cols), 1, figsize=(10, len(numerical_cols) * 3)
+    )
+
+    for i, col in enumerate(numerical_cols):
+        sns.histplot(data[col], kde=True, ax=ax[i])
+        ax[i].set_title(f"Distribution of {col}")
+
+    plt.tight_layout()
+    return fig

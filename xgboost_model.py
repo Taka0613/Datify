@@ -1,4 +1,4 @@
-# XGBoost Model Saved as Python File
+# Machine Learning Model Saved as Python File
 from xgboost import XGBRegressor
 
 def load_model():
