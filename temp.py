@@ -76,7 +76,7 @@ def load_and_process_data(file_path, skip_rows, date_column, sales_column):
 
 
 # App Title
-st.title("Wonder Palette app")
+st.title("Data Analysis and Model Training")
 
 # Tabs for Navigation
 tab1, tab2, tab3, tab4 = st.tabs(
