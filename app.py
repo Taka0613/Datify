@@ -1,7 +1,13 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error
+import shap
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from lightgbm import LGBMRegressor
+from xgboost import XGBRegressor
+from datetime import datetime
+
+# Custom modules
 from config import (
     MODEL_PATH,
     DATA_PATH,
@@ -18,8 +24,6 @@ from feature_importance import (
     plot_shap_summary,
     plot_shap_dependence,
 )
-import os
-from datetime import datetime
 
 # Initialize session state
 if "matching_columns" not in st.session_state:
@@ -58,6 +62,26 @@ glossary = {
         "Dividing data into training and testing sets to evaluate model performance. "
         "[Learn more](https://www.shiksha.com/online-courses/articles/train-test-split/#:~:text=A%20train%20test%20split%20is,on%20the%20unseen%20testing%20set./)"
     ),
+    "Root Mean Squared Error (RMSE)": (
+        "A metric that measures the average magnitude of prediction errors, penalizing large errors more. "
+        "[Learn more](https://statisticsbyjim.com/regression/root-mean-square-error-rmse/)"
+    ),
+    "Mean Squared Error (MSE)": (
+        "The average of squared differences between actual and predicted values. Larger errors contribute more. "
+        "[Learn more](https://towardsdatascience.com/understanding-the-mean-squared-error-and-how-it-affects-your-regression-model-4c5d60dbe880)"
+    ),
+    "Mean Absolute Error (MAE)": (
+        "Measures the average absolute differences between actual and predicted values, making it easier to interpret. "
+        "[Learn more](https://medium.com/@mireille.tsehaye/mean-absolute-error-mae-explained-d8f18239451f)"
+    ),
+    "Mean Absolute Percentage Error (MAPE)": (
+        "Expresses the prediction error as a percentage of actual values, making it useful for business applications. "
+        "[Learn more](https://machinelearningmastery.com/how-to-calculate-mean-absolute-percentage-error-mape-in-python/)"
+    ),
+    "R² Score (Coefficient of Determination)": (
+        "Represents how well the model explains variance in the data, where 1.0 is a perfect fit. "
+        "[Learn more](https://www.statology.org/r-squared-in-regression-analysis/)"
+    ),
 }
 
 # Add glossary section in the sidebar
@@ -67,263 +91,243 @@ with st.sidebar.expander("📖 Glossary: Technical Terminology"):
         st.markdown(f"**{term}:** {definition}")
 
 
+# Initialize session state
+if "selected_column" not in st.session_state:
+    st.session_state.selected_column = None
+if "run_training" not in st.session_state:
+    st.session_state.run_training = False
+if "models" not in st.session_state:
+    st.session_state.models = {}
+
+
 # Cache data loading and processing
 @st.cache_data
 def load_and_process_data(file_path, skip_rows, date_column, sales_column):
+    """
+    Loads the data, preprocesses it, and adds features.
+    """
     data = load_data(file_path, skip_rows, date_column, sales_column)
     data = add_features(data)
     return data
 
 
 # App Title
-st.title("Datify app")
+st.title("Datify App")
 
 # Tabs for Navigation
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["🔍 Search", "⚙️ Train Model", "📊 Explainable AI", "📈 Visualization"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "🔍 Search",
+        "⚙️ Train Model",
+        "📊 Explainable AI",
+        "📈 Visualization",
+        "📊 Model Insights",
+    ]
 )
 
+import seaborn as sns
+
+# Tab 1: Search and Select Data
 with tab1:
-    st.header("🔍 Search for Product Data")
+    st.header("🔍 Search and Analyze Product Data")
 
     # Search filters
-    market_query = st.text_input("Search by Market (e.g., 'Market A')")
-    category_query = st.text_input("Search by Category (e.g., 'Category X')")
-    brand_query = st.text_input("Search by Brand (e.g., 'Brand 1')")
-    item_query = st.text_input("Search by Item (e.g., 'Item 101')")
+    market_query = st.text_input("Search by Market")
+    category_query = st.text_input("Search by Category")
+    brand_query = st.text_input("Search by Brand")
+    item_query = st.text_input("Search by Item")
 
     if st.button("Search"):
         column_names = extract_column_names(DATA_PATH)
         matching_columns = column_names
 
-        # Apply filters dynamically
-        if market_query:
-            matching_columns = [
-                col for col in matching_columns if market_query.lower() in col.lower()
-            ]
-        if category_query:
-            matching_columns = [
-                col for col in matching_columns if category_query.lower() in col.lower()
-            ]
-        if brand_query:
-            matching_columns = [
-                col for col in matching_columns if brand_query.lower() in col.lower()
-            ]
-        if item_query:
-            matching_columns = [
-                col for col in matching_columns if item_query.lower() in col.lower()
-            ]
+        # Apply search filters
+        for query in [market_query, category_query, brand_query, item_query]:
+            if query:
+                matching_columns = [
+                    col for col in matching_columns if query.lower() in col.lower()
+                ]
 
         st.session_state.matching_columns = matching_columns
-        st.session_state.selected_column = None  # Reset selection
-        st.session_state.run_training = False  # Reset training state
 
     # Display search results
-    if st.session_state.matching_columns:
-        st.subheader("Search Results")
+    if "matching_columns" in st.session_state and st.session_state.matching_columns:
         selected_option = st.selectbox(
             "Select a column to analyze:", st.session_state.matching_columns
         )
-
         if selected_option:
-            st.session_state.selected_column = selected_option  # Store selection
-            st.write(f"✅ Selected Column: `{st.session_state.selected_column}`")
+            st.session_state.selected_column = selected_option
+            st.success(f"✅ Selected Column: `{st.session_state.selected_column}`")
 
-    # Ensure a column is selected before proceeding to insights
-    if not st.session_state.selected_column:
-        st.warning("⚠️ Please select a column before generating insights.")
-    else:
-        if st.button("Generate Insights"):
-            st.session_state.run_insights = True  # Flag to trigger insights
+    # Ensure column is selected before insights
+    if st.session_state.selected_column and st.button("Generate Insights"):
+        st.session_state.run_insights = True
 
-    # Data Insights Panel (Runs when "Generate Insights" is clicked)
+    # Data Insights Panel
     if "run_insights" in st.session_state and st.session_state.run_insights:
         st.header("📊 Data Insights")
 
-        # Ensure a valid column is selected
         if not st.session_state.selected_column:
-            st.error(
-                "⚠️ No column selected. Please select a column before running insights."
-            )
+            st.error("⚠️ No column selected.")
         else:
             date_column = extract_column_names(DATA_PATH)[0]
             selected_sales_column = st.session_state.selected_column
-
-            # Load data with selected column
             data = load_and_process_data(
                 DATA_PATH, SKIP_ROWS, date_column, selected_sales_column
             )
 
-            insights = generate_data_insights(data)
+            # 🔹 Display Summary Statistics
+            st.subheader("📊 Descriptive Statistics")
+            st.dataframe(data.describe())
 
-            # Display missing values
-            if insights["missing_values"]:
-                st.subheader("🔴 Missing Values Detected")
-                for col, percentage in insights["missing_values"].items():
-                    st.write(f"**{col}**: {percentage:.2f}% missing")
-            else:
-                st.write("✅ No missing values detected!")
-
-            # Show feature statistics
-            st.subheader("📊 Feature Statistics")
-            st.dataframe(
-                pd.DataFrame.from_dict(insights["feature_statistics"], orient="index")
+            # 🔹 Missing Value Analysis
+            st.subheader("🚨 Missing Values")
+            missing_values = data.isnull().sum()
+            missing_percent = (missing_values / len(data)) * 100
+            missing_data = pd.DataFrame(
+                {"Missing Values": missing_values, "Percentage": missing_percent}
             )
+            st.dataframe(missing_data)
 
-            # Show correlation with sales
-            if "correlation" in insights:
-                st.subheader("📈 Correlation with Sales")
-                st.bar_chart(pd.Series(insights["correlation"]))
+            # 🔹 Unique Values Analysis
+            st.subheader("🔍 Unique Values per Column")
+            unique_counts = data.nunique().to_frame(name="Unique Values")
+            st.dataframe(unique_counts)
 
-            # Show data distribution plots
-            st.subheader("📌 Data Distributions")
-            st.pyplot(plot_data_distribution(data))
+            # 🔹 Outlier Detection (Boxplot)
+            st.subheader("📌 Outlier Detection")
+            fig, ax = plt.subplots(figsize=(8, 4))
+            sns.boxplot(data=data[["sales"]], ax=ax)
+            ax.set_title("Sales Outliers")
+            st.pyplot(fig)
+
+            # 🔹 Sales Trend Visualization
+            st.subheader("📈 Sales Trends Over Time")
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(data["date"], data["sales"], label="Sales", color="blue", alpha=0.7)
+            ax.plot(
+                data["date"],
+                data["sales"].rolling(30).mean(),
+                label="30-Day Moving Average",
+                color="red",
+            )
+            ax.set_title("Sales Over Time with Moving Average")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Sales")
+            ax.legend()
+            st.pyplot(fig)
+
+            # 🔹 Sales Distribution Histogram
+            st.subheader("📊 Sales Distribution")
+            fig, ax = plt.subplots(figsize=(8, 5))
+            sns.histplot(data["sales"], bins=30, kde=True, ax=ax)
+            ax.set_title("Sales Distribution")
+            st.pyplot(fig)
+
+            # 🔹 Correlation Heatmap
+            st.subheader("📉 Correlation Heatmap")
+            correlation_matrix = data.corr()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            sns.heatmap(
+                correlation_matrix, annot=True, cmap="coolwarm", fmt=".2f", ax=ax
+            )
+            ax.set_title("Feature Correlations")
+            st.pyplot(fig)
 
 
-# Tab 2: Train Model
+# Tab 2: Train Models
 with tab2:
     st.header("⚙️ Model Training and Evaluation")
 
-    # Ensure that insights were generated first
     if "run_insights" not in st.session_state or not st.session_state.run_insights:
-        st.warning("⚠️ Please generate data insights before training the model.")
+        st.warning("⚠️ Please generate data insights first.")
     elif st.session_state.selected_column:
         date_column = extract_column_names(DATA_PATH)[0]
         sales_column = st.session_state.selected_column
         data = load_and_process_data(DATA_PATH, SKIP_ROWS, date_column, sales_column)
 
-        # Model selection dropdown
-        model_choice = st.radio(
-            "Select Model:", ["LightGBM (Fast)", "XGBoost (Slower, More Accurate)"]
-        )
+        if st.button("Train Models"):
+            st.session_state.run_training = True
 
-        if st.button("Train Model"):
-            st.session_state.run_training = True  # Flag for training
-
-    # Run Training if initiated
     if st.session_state.run_training and st.session_state.selected_column:
-        with st.spinner("Training model..."):
-            # Split the data
+        with st.spinner("Training models..."):
             X_train, y_train, X_test, y_test = split_data(
                 data, FEATURE_COLUMNS, TARGET_COLUMN, TRAIN_TEST_SPLIT_RATIO
             )
 
-            # Select and train model
-            if model_choice == "LightGBM (Fast)":
-                from lightgbm import LGBMRegressor
+            # Train LightGBM
+            lgbm_model = LGBMRegressor(
+                n_estimators=100, learning_rate=0.1, random_state=42
+            )
+            lgbm_model.fit(X_train, y_train)
+            lgbm_preds = lgbm_model.predict(X_test)
+            lgbm_rmse = mean_squared_error(y_test, lgbm_preds, squared=False)
 
-                model = LGBMRegressor(
-                    n_estimators=100, learning_rate=0.1, random_state=42
-                )
-            else:
-                from xgboost import XGBRegressor
+            # Train XGBoost
+            xgb_model = XGBRegressor(**XGBOOST_PARAMS)
+            xgb_model.fit(X_train, y_train)
+            xgb_preds = xgb_model.predict(X_test)
+            xgb_rmse = mean_squared_error(y_test, xgb_preds, squared=False)
 
-                model = XGBRegressor(**XGBOOST_PARAMS)
-
-            model.fit(X_train, y_train)
-            st.session_state.model = model
-            st.session_state.X_train = X_train
-
-            # Compute SHAP values
-            shap_values, _ = compute_shap_values(model, X_train)
-            st.session_state.shap_values = shap_values
-
-            # Make predictions
-            predictions = model.predict(X_test)
-            rmse = mean_squared_error(y_test, predictions, squared=False)
-            st.metric(label="RMSE", value=f"{rmse:.2f}")
-
-            # Save model
-            save_model_as_py(model, MODEL_PATH, FEATURE_COLUMNS, XGBOOST_PARAMS)
-            st.success(f"Model saved!")
+            # Store models
+            st.session_state.models = {
+                "LightGBM": {"model": lgbm_model, "rmse": lgbm_rmse},
+                "XGBoost": {"model": xgb_model, "rmse": xgb_rmse},
+            }
+            st.success("Models trained successfully!")
 
 # Tab 3: Explainable AI
 with tab3:
     st.header("📊 Explainable AI")
 
-    if st.session_state.model and st.session_state.shap_values is not None:
-        mode = st.radio("Select Mode", ["Simple", "Advanced"])
+    if "models" in st.session_state and st.session_state.models:
+        model_choice = st.radio("Select Model:", ["LightGBM", "XGBoost"])
 
-        if mode == "Simple":
-            st.write("Top 3 Features Impacting Predictions:")
-            shap_summary = plot_shap_summary(
-                st.session_state.shap_values, st.session_state.X_train, top_n=3
-            )
+        if model_choice in st.session_state.models:
+            model = st.session_state.models[model_choice]["model"]
+            shap_values, _ = compute_shap_values(model, X_train)
+
+            st.subheader("SHAP Summary Plot")
+            shap_summary = plot_shap_summary(shap_values, X_train)
             st.pyplot(shap_summary)
 
-        elif mode == "Advanced":
-            st.write("SHAP Summary Plot:")
-            shap_summary = plot_shap_summary(
-                st.session_state.shap_values, st.session_state.X_train
-            )
-            st.pyplot(shap_summary)
-
-            feature = st.selectbox(
-                "Select Feature for Dependence Plot", FEATURE_COLUMNS
-            )
-            dependence_plot = plot_shap_dependence(
-                st.session_state.shap_values, st.session_state.X_train, feature
-            )
+            st.subheader("SHAP Dependence Plot")
+            feature = st.selectbox("Select Feature", FEATURE_COLUMNS)
+            dependence_plot = plot_shap_dependence(shap_values, X_train, feature)
             st.pyplot(dependence_plot)
 
-# Tab 4: Visualization
-with tab4:
-    st.header("📈 Data Visualization")
+# Tab 4: Model Insights
+with tab5:
+    st.header("📊 Model Insights Dashboard")
 
-    if st.session_state.selected_column:
-        date_column = extract_column_names(DATA_PATH)[0]
-        data = load_and_process_data(
-            DATA_PATH, SKIP_ROWS, date_column, st.session_state.selected_column
-        )
+    if "models" in st.session_state and st.session_state.models:
+        model_names = list(st.session_state.models.keys())
+        rmses = [st.session_state.models[m]["rmse"] for m in model_names]
 
-        # Convert date to datetime for Streamlit slider compatibility
-        data["date"] = pd.to_datetime(data["date"])
-        min_date, max_date = data["date"].min(), data["date"].max()
+        best_model = model_names[rmses.index(min(rmses))]
+        st.subheader(f"🏆 Best Model: {best_model} (Lowest RMSE)")
 
-        date_range = st.slider(
-            "Select Date Range",
-            min_value=min_date.to_pydatetime(),
-            max_value=max_date.to_pydatetime(),
-            value=(min_date.to_pydatetime(), max_date.to_pydatetime()),
-        )
+        st.bar_chart({"RMSE": {model: rmse for model, rmse in zip(model_names, rmses)}})
 
-        filtered_data = data[
-            (data["date"] >= date_range[0]) & (data["date"] <= date_range[1])
-        ]
+        # Compute SHAP Explainability Score
+        shap_importances = {}
+        for model_name, model_info in st.session_state.models.items():
+            shap_values, _ = compute_shap_values(model_info["model"], X_train)
+            shap_importances[model_name] = abs(shap_values.values).mean()
 
-        st.subheader("Original Data Visualization")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(
-            filtered_data["date"],
-            filtered_data["sales"],
-            label="Original Data",
-            color="blue",
-        )
-        ax.set_title("Original Sales Data")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Sales")
-        ax.legend()
-        ax.tick_params(axis="x", rotation=45)
+        st.subheader("🔍 Explainability Score")
+        st.bar_chart({"SHAP Importance": shap_importances})
+
+        # Trade-Off Analysis
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(rmses, list(shap_importances.values()), color=["blue", "orange"])
+        for i, model_name in enumerate(model_names):
+            ax.annotate(model_name, (rmses[i], list(shap_importances.values())[i]))
+
+        ax.set_xlabel("RMSE (Lower is Better)")
+        ax.set_ylabel("SHAP Explainability Score (Higher is Better)")
+        ax.set_title("Trade-Off Between Accuracy and Explainability")
         st.pyplot(fig)
 
-    if st.session_state.model:
-        st.subheader("Prediction Visualization")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(
-            data.loc[X_test.index, "date"],
-            y_test,
-            label="Actual Sales (Test)",
-            color="blue",
-        )
-        ax.plot(
-            data.loc[X_test.index, "date"],
-            predictions,
-            label="Predicted Sales",
-            color="orange",
-        )
-        ax.set_title("Model Predictions vs Actual Sales")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Sales")
-        ax.legend()
-        ax.tick_params(axis="x", rotation=45)
-        st.pyplot(fig)
+    else:
+        st.warning("⚠️ No trained models found.")
