@@ -6,6 +6,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from lightgbm import LGBMRegressor
 from xgboost import XGBRegressor
 from datetime import datetime
+import numpy as np
 
 # Custom modules
 from config import (
@@ -172,13 +173,29 @@ with tab1:
         else:
             date_column = extract_column_names(DATA_PATH)[0]
             selected_sales_column = st.session_state.selected_column
+
             data = load_and_process_data(
                 DATA_PATH, SKIP_ROWS, date_column, selected_sales_column
             )
 
+            print("Types in date column before fix:")
+            print(data["date"].apply(type).value_counts())
+
+            # Ensure the date column is properly formatted for Streamlit (avoid PyArrow errors)
+            data["date"] = pd.to_datetime(data["date"], errors="coerce")
+
+            data = data.dropna(subset=["date"])
+
+            print(
+                "Types in date column after fix:", data["date"].dtype
+            )  # should show datetime64[ns]
+
+            # ✅ Safe copy for display (convert datetime to string to avoid Arrow errors)
+            data_display = data.copy()
+            data_display["date"] = data_display["date"].dt.strftime("%Y-%m-%d")
             # 🔹 Display Summary Statistics
             st.subheader("📊 Descriptive Statistics")
-            st.dataframe(data.describe())
+            st.dataframe(data_display.describe())
 
             # 🔹 Missing Value Analysis
             st.subheader("🚨 Missing Values")
@@ -187,11 +204,16 @@ with tab1:
             missing_data = pd.DataFrame(
                 {"Missing Values": missing_values, "Percentage": missing_percent}
             )
-            st.dataframe(missing_data)
+            missing_data_display = missing_data.copy()
+            missing_data_display.index = missing_data_display.index.astype(str)
+            st.dataframe(missing_data_display)
 
             # 🔹 Unique Values Analysis
             st.subheader("🔍 Unique Values per Column")
             unique_counts = data.nunique().to_frame(name="Unique Values")
+            unique_counts_display = unique_counts.copy()
+            unique_counts_display.index = unique_counts_display.index.astype(str)
+            st.dataframe(unique_counts_display)
             st.dataframe(unique_counts)
 
             # 🔹 Outlier Detection (Boxplot)
@@ -226,7 +248,8 @@ with tab1:
 
             # 🔹 Correlation Heatmap
             st.subheader("📉 Correlation Heatmap")
-            correlation_matrix = data.corr()
+            numeric_data = data.select_dtypes(include="number")
+            correlation_matrix = numeric_data.corr()
             fig, ax = plt.subplots(figsize=(6, 4))
             sns.heatmap(
                 correlation_matrix, annot=True, cmap="coolwarm", fmt=".2f", ax=ax
@@ -261,13 +284,14 @@ with tab2:
             )
             lgbm_model.fit(X_train, y_train)
             lgbm_preds = lgbm_model.predict(X_test)
-            lgbm_rmse = mean_squared_error(y_test, lgbm_preds, squared=False)
+            print(f"y_test shape: {y_test.shape}, lgbm_preds shape: {lgbm_preds.shape}")
+            lgbm_rmse = np.sqrt(mean_squared_error(y_test, lgbm_preds))
 
             # Train XGBoost
             xgb_model = XGBRegressor(**XGBOOST_PARAMS)
             xgb_model.fit(X_train, y_train)
             xgb_preds = xgb_model.predict(X_test)
-            xgb_rmse = mean_squared_error(y_test, xgb_preds, squared=False)
+            xgb_rmse = np.sqrt(mean_squared_error(y_test, lgbm_preds))
 
             # Store models
             st.session_state.models = {

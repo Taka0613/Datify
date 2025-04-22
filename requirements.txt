@@ -1,9 +1,11 @@
-pandas
-numpy
+lightgbm
 matplotlib
-xgboost
+numpy
+pandas
+plotly
 scikit-learn
+seaborn
 shap
 streamlit
-plotly
+xgboost
 openpyxl
