@@ -53,6 +53,7 @@ glossary = {
     ),
     "XGBoost": (
         "An optimized gradient boosting library designed to be highly efficient and flexible. "
+        "[common issues] (https://docs.google.com/document/d/1GIe0RWmgei3ASnztYQIZrHeRqTNRJYZTBOYsWxB9PPY/edit?usp=sharing)"
         "[Learn more](https://medium.com/@prathameshsonawane/xgboost-how-does-this-work-e1cae7c5b6cb/)"
     ),
     "Feature Importance": (
@@ -60,7 +61,7 @@ glossary = {
         "[Learn more](https://builtin.com/data-science/feature-importance#:~:text=What%20is%20feature%20importance%20simply,a%20machine%20learning%20model's%20predictions./)"
     ),
     "Train-Test Split": (
-        "Dividing data into training and testing sets to evaluate model performance. "
+        "Dividing data into training and testing sets to evaluate model performance."
         "[Learn more](https://www.shiksha.com/online-courses/articles/train-test-split/#:~:text=A%20train%20test%20split%20is,on%20the%20unseen%20testing%20set./)"
     ),
     "Root Mean Squared Error (RMSE)": (
